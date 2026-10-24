@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Veganer Wochenplaner · REWE-Lieferung</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌱</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🌱 <span>Veganer Wochenplaner</span></div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="plan" class="active">🗓️ <span>Wochenplan</span></button>
+      <button data-tab="shop">🛒 <span>Einkauf</span><b class="badge" id="shopBadge"></b></button>
+      <button data-tab="recipes">📖 <span>Rezepte</span></button>
+      <button data-tab="feedback">💬 <span>Feedback</span></button>
+      <button data-tab="settings">⚙️ <span>Einstellungen</span></button>
+    </nav>
+  </header>
+
+  <main id="app"></main>
+
+  <div class="modal-bg" id="modalBg" hidden>
+    <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="data.js"></script>
+  <script src="planner.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
