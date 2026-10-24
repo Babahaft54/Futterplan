@@ -52,6 +52,12 @@
       ],
       checked: {},
       pantryMissing: {},
+      inventory: {},       // { [ingKey]: mengeInBasiseinheit }
+      prices: {},          // { [ingKey]: { lastPrice, avgPrice, minPrice, maxPrice, packSize, updatedAt, history: [{date, price, store}] } }
+      receipts: [],        // [{ id, date, store, total, itemCount, items: [...] }]
+      learnedAliases: {},  // { [normText]: { ingKey, packQty, label, lastPrice, count } }
+      extraPurchases: {},  // { [normText]: { name, count, lastPrice, dismissed } }
+      cookedMeals: {},     // { ["YYYY-MM-DD:slot"]: true }
       plan: null,
     };
   }
@@ -85,18 +91,39 @@
     return s;
   }
 
-  // Zusätzliche Packungen, die ein Rezept mit n Portionen zum bisherigen Einkauf hinzufügt
-  function addedPacks(r, servings, need) {
+  // Zusätzliche Packungen, die ein Rezept mit n Portionen zum bisherigen Einkauf hinzufügt (unter Berücksichtigung des Inventars)
+  function addedPacks(r, servings, need, st) {
     let added = 0;
+    const inv = (st && st.inventory) || {};
     for (const ing of r.ingredients) {
       const I = D.INGREDIENTS[ing.k];
       if (!I || I.pantry || !I.pack) continue;
-      const before = need[ing.k] || 0;
-      const after = before + ing.q * servings;
+      const inStock = inv[ing.k] || 0;
+      const before = Math.max(0, (need[ing.k] || 0) - inStock);
+      const after = Math.max(0, (need[ing.k] || 0) + ing.q * servings - inStock);
       added += packsFor(after, I.pack) - packsFor(before, I.pack);
     }
     return added;
   }
+
+  // Bonus, wenn ein Rezept vorhandenes Inventar sinnvoll aufbraucht
+  function inventoryBonus(r, servings, need, st) {
+    const inv = (st && st.inventory) || {};
+    let bonus = 0;
+    for (const ing of r.ingredients) {
+      const I = D.INGREDIENTS[ing.k];
+      if (!I || I.pantry) continue;
+      const inStock = inv[ing.k] || 0;
+      const alreadyUsed = need[ing.k] || 0;
+      const avail = Math.max(0, inStock - alreadyUsed);
+      if (avail > 0) {
+        const covered = Math.min(avail, ing.q * servings) / (ing.q * servings);
+        bonus += covered * 0.85;
+      }
+    }
+    return bonus;
+  }
+
   function packsFor(q, pack) { return q <= 0 ? 0 : Math.max(1, Math.ceil(q / pack - 0.05)); }
   function addNeed(r, servings, need) {
     for (const ing of r.ingredients) need[ing.k] = (need[ing.k] || 0) + ing.q * servings;
@@ -105,7 +132,7 @@
   function pickBest(cands, st, servings, need, rng, extra) {
     let best = null, bestS = -Infinity;
     for (const r of cands) {
-      let s = prefScore(r, st) - 0.55 * addedPacks(r, servings, need) + rng() * 1.6;
+      let s = prefScore(r, st) - 0.55 * addedPacks(r, servings, need, st) + inventoryBonus(r, servings, need, st) + rng() * 1.6;
       if (extra) s += extra(r);
       if (s > bestS) { bestS = s; best = r; }
     }
@@ -296,8 +323,34 @@
     return need;
   }
 
+  // ---------- Preise & Kosten ----------
+  function ingredientPackPrice(st, key) {
+    const I = D.INGREDIENTS[key];
+    if (!I) return 1.49;
+    const pr = st && st.prices && st.prices[key];
+    if (pr && pr.lastPrice > 0) return pr.lastPrice;
+    return I.defaultPrice || 1.49;
+  }
+
+  function recipeCost(st, r, servings) {
+    servings = servings || 1;
+    let cost = 0;
+    for (const ing of r.ingredients) {
+      const I = D.INGREDIENTS[ing.k];
+      if (!I || I.pantry || !I.pack) continue;
+      const packPrice = ingredientPackPrice(st, ing.k);
+      cost += ((ing.q * servings) / I.pack) * packPrice;
+    }
+    return Math.round(cost * 100) / 100;
+  }
+
+  function fmtPrice(v) {
+    return (Number(v) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+  }
+
   function shoppingList(st) {
     const plan = st.plan;
+    const inv = (st && st.inventory) || {};
     const need = {}, usedIn = {};
     if (plan) plan.days.forEach((d) => {
       for (const slot of SLOTS) {
@@ -310,20 +363,88 @@
         }
       }
     });
-    const groups = {}, pantry = [];
+    const groups = {}, pantry = [], coveredByInventory = [];
+    let totalCost = 0, savedByInventoryCost = 0;
+
     for (const [k, q] of Object.entries(need)) {
       const I = D.INGREDIENTS[k];
-      const item = { key: k, name: I.name, need: q, unit: I.unit, search: I.search, usedIn: [...usedIn[k]] };
-      if (I.pantry) { if (k !== 'salzpfeffer') pantry.push(item); continue; }
-      item.packs = packsFor(q, I.pack);
+      const inStock = Math.max(0, inv[k] || 0);
+      const fromInventory = Math.min(q, inStock);
+      const netNeed = Math.max(0, q - fromInventory);
+      const packPrice = ingredientPackPrice(st, k);
+
+      const item = {
+        key: k,
+        name: I.name,
+        need: q,
+        inStock,
+        fromInventory,
+        netNeed,
+        unit: I.unit,
+        search: I.search,
+        usedIn: [...usedIn[k]],
+        packPrice,
+        isLearnedPrice: !!(st.prices && st.prices[k] && st.prices[k].lastPrice > 0),
+      };
+
+      if (I.pantry) {
+        if (k !== 'salzpfeffer') {
+          item.estCost = st.pantryMissing && st.pantryMissing[k] ? packPrice : 0;
+          if (item.estCost) totalCost += item.estCost;
+          pantry.push(item);
+        }
+        continue;
+      }
+
+      const grossPacks = packsFor(q, I.pack);
+      item.packs = netNeed > 0 ? packsFor(netNeed, I.pack) : 0;
+      item.savedPacks = Math.max(0, grossPacks - item.packs);
       item.packLabel = I.packLabel;
-      item.rest = Math.max(0, item.packs * I.pack - q);
-      item.restPct = item.rest / (item.packs * I.pack);
-      (groups[I.cat] = groups[I.cat] || []).push(item);
+      item.rest = Math.max(0, item.packs * I.pack - netNeed);
+      item.restPct = item.packs > 0 ? item.rest / (item.packs * I.pack) : 0;
+      item.estCost = Math.round(item.packs * packPrice * 100) / 100;
+      totalCost += item.estCost;
+      savedByInventoryCost += item.savedPacks * packPrice;
+
+      if (item.packs === 0) {
+        coveredByInventory.push(item);
+      } else {
+        (groups[I.cat] = groups[I.cat] || []).push(item);
+      }
     }
     const out = D.CATS.filter((c) => groups[c]).map((c) => ({ cat: c, items: groups[c].sort((a, b) => a.name.localeCompare(b.name, 'de')) }));
     pantry.sort((a, b) => a.name.localeCompare(b.name, 'de'));
-    return { groups: out, pantry };
+    coveredByInventory.sort((a, b) => a.name.localeCompare(b.name, 'de'));
+    return {
+      groups: out,
+      pantry,
+      coveredByInventory,
+      totalCost: Math.round(totalCost * 100) / 100,
+      savedByInventoryCost: Math.round(savedByInventoryCost * 100) / 100,
+    };
+  }
+
+  function planCostSummary(st) {
+    const sl = shoppingList(st);
+    let totalServings = 0, mealTheoreticalCost = 0;
+    if (st.plan) {
+      st.plan.days.forEach((d) => {
+        for (const slot of SLOTS) {
+          const m = d.meals[slot];
+          if (!m || !m.servings) continue;
+          const r = RBY[m.id];
+          totalServings += m.servings;
+          mealTheoreticalCost += recipeCost(st, r, m.servings);
+        }
+      });
+    }
+    return {
+      shopCost: sl.totalCost,
+      savedByInventory: sl.savedByInventoryCost,
+      mealTheoreticalCost: Math.round(mealTheoreticalCost * 100) / 100,
+      avgPerPersonDay: st.plan && st.settings.persons ? Math.round((mealTheoreticalCost / (st.plan.days.length * st.settings.persons)) * 100) / 100 : 0,
+      avgPerServing: totalServings ? Math.round((mealTheoreticalCost / totalServings) * 100) / 100 : 0,
+    };
   }
 
   function fmtQty(q, unit) {
@@ -471,19 +592,114 @@
     return effects;
   }
 
+  // ---------- Inventar & Verbrauchs-Automatisierung ----------
+  function adjustInventory(st, key, delta) {
+    if (!st.inventory) st.inventory = {};
+    const I = D.INGREDIENTS[key];
+    if (!I || I.pantry) return 0;
+    const next = Math.max(0, Math.round(((st.inventory[key] || 0) + delta) * 100) / 100);
+    if (next <= 0) delete st.inventory[key];
+    else st.inventory[key] = next;
+    return next;
+  }
+
+  function toggleCookedMeal(st, dayIdx, slot) {
+    if (!st.plan || !st.plan.days[dayIdx]) return false;
+    if (!st.cookedMeals) st.cookedMeals = {};
+    const d = st.plan.days[dayIdx];
+    const m = d.meals[slot];
+    if (!m || !m.servings) return false;
+    const cookKey = `${d.date}:${slot}`;
+    const r = RBY[m.id];
+    const wasCooked = !!st.cookedMeals[cookKey];
+    const sign = wasCooked ? 1 : -1;
+    for (const ing of r.ingredients) {
+      const I = D.INGREDIENTS[ing.k];
+      if (!I || I.pantry) continue;
+      adjustInventory(st, ing.k, sign * ing.q * m.servings);
+    }
+    if (wasCooked) delete st.cookedMeals[cookKey];
+    else st.cookedMeals[cookKey] = true;
+    return !wasCooked;
+  }
+
+  function consumeWeekPlan(st) {
+    if (!st.plan) return 0;
+    if (!st.cookedMeals) st.cookedMeals = {};
+    let consumedCount = 0;
+    st.plan.days.forEach((d, idx) => {
+      for (const slot of SLOTS) {
+        const m = d.meals[slot];
+        if (!m || !m.servings) continue;
+        const cookKey = `${d.date}:${slot}`;
+        if (!st.cookedMeals[cookKey]) {
+          toggleCookedMeal(st, idx, slot);
+          consumedCount++;
+        }
+      }
+    });
+    return consumedCount;
+  }
+
+  function addCheckedToInventory(st) {
+    const sl = shoppingList(st);
+    let added = 0;
+    sl.groups.forEach((g) => {
+      g.items.forEach((it) => {
+        const id = 'i:' + it.key;
+        if (st.checked && st.checked[id]) {
+          const I = D.INGREDIENTS[it.key];
+          if (I && !I.pantry && I.pack > 0) {
+            adjustInventory(st, it.key, it.packs * I.pack);
+            delete st.checked[id];
+            added++;
+          }
+        }
+      });
+    });
+    return added;
+  }
+
+  function cookableWithInventory(st) {
+    const inv = (st && st.inventory) || {};
+    const P = (st && st.settings && st.settings.persons) || 2;
+    const results = [];
+    for (const r of D.RECIPES) {
+      if (!isEligible(r, st)) continue;
+      const nonPantry = r.ingredients.filter((i) => D.INGREDIENTS[i.k] && !D.INGREDIENTS[i.k].pantry);
+      if (!nonPantry.length) continue;
+      let haveCount = 0;
+      const missing = [];
+      for (const ing of nonPantry) {
+        const needed = ing.q * P;
+        const avail = inv[ing.k] || 0;
+        if (avail >= needed * 0.8) haveCount++;
+        else missing.push(D.INGREDIENTS[ing.k].name.replace(/ \(.*\)$/, ''));
+      }
+      const ratio = haveCount / nonPantry.length;
+      if (ratio >= 0.5) {
+        results.push({ recipe: r, ratio, haveCount, total: nonPantry.length, missing });
+      }
+    }
+    return results.sort((a, b) => b.ratio - a.ratio || prefScore(b.recipe, st) - prefScore(a.recipe, st));
+  }
+
   function archivePlan(st) {
     if (!st.plan) return;
+    consumeWeekPlan(st);
     const ids = [];
     st.plan.days.forEach((d) => SLOTS.forEach((s) => d.meals[s] && !ids.includes(d.meals[s].id) && ids.push(d.meals[s].id)));
     st.history.unshift({ start: st.plan.start, ids });
     st.history = st.history.slice(0, 6);
+    st.cookedMeals = {};
   }
 
   function planEnd(plan) { return addDays(parseIso(plan.start), plan.days.length - 1); }
 
   root.VPPlanner = {
     RBY, WD, SLOTS, iso, parseIso, addDays, nextDelivery, defaultState, generatePlan, swapMeal,
-    shoppingList, fmtQty, dayProtein, applyFeedback, rateRecipe, setPref, bumpPref,
-    isEligible, archivePlan, planEnd, prefScore,
+    shoppingList, fmtQty, fmtPrice, dayProtein, applyFeedback, rateRecipe, setPref, bumpPref,
+    isEligible, archivePlan, planEnd, prefScore, ingredientPackPrice, recipeCost, planCostSummary,
+    adjustInventory, toggleCookedMeal, consumeWeekPlan, addCheckedToInventory, cookableWithInventory,
   };
 })(typeof window !== 'undefined' ? window : this);

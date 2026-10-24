@@ -116,6 +116,33 @@
     salzpfeffer: ['Salz & Pfeffer', 9, 'Prise', 0, '', 'Salz', true],
   };
 
+  // Richtpreise (Euro je Packung/Einheit bei REWE) als Ausgangsbasis vor echten Kassenbons
+  const DEFAULT_PRICES = {
+    zwiebel: 0.25, rote_zwiebel: 0.35, knoblauch: 0.89, ingwer: 0.79,
+    paprika: 0.99, zucchini: 0.89, brokkoli: 1.49, karotte: 0.20,
+    suesskartoffel: 1.19, kartoffeln: 1.99, tomaten: 0.45, cherrytomaten: 1.49,
+    gurke: 0.99, avocado: 1.49, zitrone: 0.59, limette: 0.49,
+    banane: 0.35, apfel: 0.45, babyspinat: 1.79, champignons: 1.99,
+    fruehlingszwiebel: 0.89, kraeuter: 1.19,
+    tofu: 1.49, raeuchertofu: 1.79, tempeh: 2.79, sojaskyr: 1.69,
+    veganes_hack: 2.49, hummus: 1.49,
+    vollkornbrot: 1.89, tortillas: 1.69,
+    reis: 1.79, quinoa: 2.99, vollkornnudeln: 1.29, linsennudeln: 2.29,
+    linsen_rot: 1.89, belugalinsen: 2.49, sojaschnetzel: 1.99,
+    kichererbsen: 0.99, kidneybohnen: 0.99, schwarzebohnen: 1.19,
+    weissebohnen: 0.99, tomaten_dose: 0.89, passata: 0.99,
+    kokosmilch: 1.49, mais: 0.99, seidentofu: 2.49,
+    granola: 2.99, haferflocken: 0.89, proteinpulver: 14.99,
+    chia: 2.29, hanfsamen: 3.49, kuerbiskerne: 2.19,
+    erdnussmus: 2.79, tahini: 3.29, cashews: 2.79,
+    sojamilch: 1.19,
+    edamame: 2.99, erbsen: 1.69, tk_spinat: 1.29, beeren: 2.99,
+    oel: 2.49, sojasauce: 1.99, gemuesebruehe: 1.49, paprikapulver: 1.29,
+    kreuzkuemmel: 1.79, currypulver: 1.49, currypaste: 2.29, kurkuma: 1.49,
+    oregano: 1.19, hefeflocken: 3.49, ahornsirup: 3.99, senf: 0.99,
+    tomatenmark: 0.89, sesam: 1.49, zimt: 1.29, chili: 1.29, salzpfeffer: 0.99,
+  };
+
   const INGREDIENTS = {};
   for (const [key, r] of Object.entries(RAW)) {
     INGREDIENTS[key] = {
@@ -128,6 +155,7 @@
       packLabel: r[4],
       search: r[5],
       pantry: !!r[6],
+      defaultPrice: DEFAULT_PRICES[key] || 1.49,
     };
   }
 
