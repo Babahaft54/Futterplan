@@ -333,12 +333,12 @@
     const stamp = `${now.getUTCFullYear()}${p2(now.getUTCMonth() + 1)}${p2(now.getUTCDate())}T${p2(now.getUTCHours())}${p2(now.getUTCMinutes())}00Z`;
     const url = location.href.split('#')[0];
     const ics = [
-      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Veganer Wochenplaner//DE', 'CALSCALE:GREGORIAN',
-      'BEGIN:VEVENT', `UID:vegan-wochenplaner-${Date.now()}@local`, `DTSTAMP:${stamp}`,
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Futterplan//DE', 'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT', `UID:futterplan-${Date.now()}@local`, `DTSTAMP:${stamp}`,
       `DTSTART:${dt}`, 'DURATION:PT20M', 'RRULE:FREQ=WEEKLY',
-      'SUMMARY:🛒 REWE bestellen + neuer veganer Wochenplan',
+      'SUMMARY:🛒 REWE bestellen + neuer Futterplan',
       `DESCRIPTION:1. Planer öffnen: ${url}\\n2. Gerichte der Woche bewerten (👍/👎)\\n3. Woche abschließen → neuer Plan\\n4. Einkaufsliste in den REWE-Warenkorb legen und Lieferung bestätigen`,
-      'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', 'DESCRIPTION:REWE-Bestellung & Wochenplan', 'END:VALARM',
+      'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', 'DESCRIPTION:REWE-Bestellung & Futterplan', 'END:VALARM',
       'END:VEVENT', 'END:VCALENDAR',
     ].join('\r\n');
     const a = document.createElement('a');
@@ -521,7 +521,7 @@
       if (act === 'export') {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([JSON.stringify(st, null, 2)], { type: 'application/json' }));
-        a.download = `wochenplaner-backup-${P.iso(today())}.json`; a.click();
+        a.download = `futterplan-backup-${P.iso(today())}.json`; a.click();
       }
       if (act === 'reset' && confirm('Wirklich alle Daten, Vorlieben und Pläne löschen?')) { localStorage.removeItem(KEY); location.reload(); }
     };
